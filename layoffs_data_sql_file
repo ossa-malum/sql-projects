@@ -1,0 +1,171 @@
+#Skills used: CREATE TABLE, ALTER TABLE, PARTITION BY, JOIN, UPDATE TABLE, DELETE
+
+#This is the code for a data cleaning project I performed in MySQL Workbench. 
+The following dataset is pulled from a list of layoffs in the tech industry from a guided work project from Youtuber Alex the Analyst. 
+
+SELECT *
+FROM layoffs;
+
+#First, I created a table named 'layoffs_staging' in order to retain a raw data file and another staging file which I worked off of to clean. 
+I then tackled cleaning the data set in stages: removing duplicates, standardizing the data in a more usable format, 
+address any null/blank values, and finally removing unnecessary columns/rows
+
+CREATE TABLE layoffs_staging
+LIKE layoffs;
+
+INSERT layoffs_staging
+SELECT *
+FROM layoffs;
+
+SELECT *
+FROM layoffs_staging;
+
+#After creating a new table, it was time to begin removing duplicates from the file. The strategy used here was to use row_num and PARTITION BY to find rows that were duplicated.
+Then, I created a new table (layoffs_staging2) with the data from layoffs_staging with adding row_num and deleted all rows greater than 1, removing any duplicates.
+
+SELECT *, 
+ROW_Number() OVER(PARTITION BY company, industry, total_laid_off, percentage_laid_off, `date`) AS row_num
+FROM layoffs_staging;
+
+WITH duplicate_cte AS
+(SELECT *, 
+ROW_Number() OVER(PARTITION BY company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, country, funds_raised_millions) AS row_num
+FROM layoffs_staging)
+SELECT *
+FROM duplicate_cte
+WHERE row_num > 1;
+
+SELECT *
+FROM layoffs_staging
+WHERE company = 'Casper';
+
+CREATE TABLE `layoffs_staging2` (
+  `company` text,
+  `location` text,
+  `industry` text,
+  `total_laid_off` int DEFAULT NULL,
+  `percentage_laid_off` text,
+  `date` text,
+  `stage` text,
+  `country` text,
+  `funds_raised_millions` int DEFAULT NULL, 
+  `row_num` int
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+SELECT *
+FROM layoffs_staging2;
+
+INSERT INTO layoffs_staging2
+SELECT *, 
+ROW_Number() OVER(PARTITION BY company, location, industry, total_laid_off, percentage_laid_off, `date`, stage, country, funds_raised_millions) AS row_num
+FROM layoffs_staging;
+
+SELECT *
+FROM layoffs_staging2
+WHERE row_num > 1;
+
+DELETE
+FROM layoffs_staging2
+WHERE row_num > 1;
+
+SELECT *
+FROM layoffs_staging2;
+
+#After removing duplicated rows, it was time to work on standardizing the data. 
+Since there were extra spaces at the beginning of some company column entries, I trimmed those first. Then, I moved on to the next column target.
+
+SELECT company, (TRIM(company))
+FROM layoffs_staging2;
+
+UPDATE layoffs_staging2
+SET company = (TRIM(company));
+
+#To fix standardization issues in the industry column, I wanted to ensure all industries were labeled with the same language. 
+I updated the columns to ensure that the 'cryptocurrency' columns became 'crypto' to match the rest of the entries in that sector.
+
+SELECT * 
+FROM layoffs_staging2
+WHERE industry LIKE 'Crypto%';
+
+UPDATE layoffs_staging2
+SET industry = 'Crypto'
+WHERE industry LIKE 'Crypto%';
+
+#The next column to standardize was country, where some United States entries had a '.' at the end. 
+To fix this, I trimmed the trailing '.' from all country entries and then set the country entries for United States to the edited version
+
+SELECT DISTINCT country
+FROM layoffs_staging2
+ORDER BY 1;
+
+SELECT DISTINCT country, TRIM(TRAILING '.' FROM country)
+FROM layoffs_staging2
+;
+
+UPDATE layoffs_staging2
+SET country = TRIM(TRAILING '.' FROM country)
+WHERE country LIKE 'United States%';
+
+#Lastly for standardizing, I wanted to change the 'date' column to the standardized format and change the data type from text to int.
+To accomplish this, I used str_to_date to update and set the date format and then altered the table to modify the type of data in the date column.
+
+SELECT `date`,
+str_to_date(`date`, '%m/%d/%Y')
+FROM layoffs_staging2;
+
+UPDATE layoffs_staging2
+SET `date` = str_to_date(`date`, '%m/%d/%Y');
+
+ALTER TABLE layoffs_staging2
+MODIFY COLUMN `date` DATE;
+
+#Next, I tackled removing null and blank data from the table. There were some industry entries which had blanks for the same company 
+(I.e. 'Airbnb' was listed as blank for one row but another 'Airbnb' row listed the industry as travel)
+To make the company industry the same for all appropriate rows, I first changed all the blanks in the industry to null. 
+Then I created a join where t1 company would equal t2 company so that I could set the industry to be the same for the company to replace where it was blank.
+
+SELECT *
+FROM layoffs_staging2
+WHERE industry IS NULL
+OR industry = '';
+
+SELECT *
+FROM layoffs_staging2
+WHERE company = 'Airbnb';
+
+UPDATE layoffs_staging2
+SET industry = NULL 
+WHERE industry = '';
+
+SELECT *
+FROM layoffs_staging2 t1
+JOIN layoffs_staging2 t2
+	ON t1.company = t2.company
+    AND t1.location = t2.location
+WHERE (t1.industry IS NULL OR t1.industry = '')
+AND t2.industry IS NOT NULL;
+
+UPDATE layoffs_staging2 t1
+JOIN layoffs_staging2 t2
+	ON t1.company = t2.company
+SET t1.industry = t2.industry
+WHERE (t1.industry IS NULL)
+AND t2.industry IS NOT NULL;
+ 
+ #The final step was to remove columns that were not necessary. 
+I deleted where total_laid_off and percentage_laid_off to ensure those blank entries no longer showed up.
+Finally, I deleted the row_num column I had used earlier when removing duplicates. 
+ 
+ SELECT *
+ FROm layoffs_staging2
+ WHERE total_laid_off IS NULL
+ AND percentage_laid_off IS NULL;
+ 
+ DELETE 
+ FROM layoffs_staging2
+  WHERE total_laid_off IS NULL
+ AND percentage_laid_off IS NULL;
+ 
+ ALTER TABLE layoffs_staging2
+ DROP COLUMN row_num;
+ 
